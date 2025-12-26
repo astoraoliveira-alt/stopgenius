@@ -27,6 +27,7 @@ export interface RoomConfig {
 export interface Category {
   id: string;
   name: string;
+  isAiSuggested?: boolean;
 }
 
 export interface Player {

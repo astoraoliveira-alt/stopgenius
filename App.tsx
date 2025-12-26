@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { GameState, Category, Player, ValidationResult, Difficulty, RoomConfig } from './types';
-import { processMultiplayerRound } from './services/geminiService';
+import { processMultiplayerRound, getCategorySuggestions } from './services/geminiService';
 import confetti from 'canvas-confetti';
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -28,8 +28,6 @@ const BOT_TEMPLATES = [
   { name: 'Bot Engraçado', avatar: '🤡', color: '#ef4444' }
 ];
 
-const ROUND_OPTIONS = [3, 5, 10, 15];
-
 const ADJECTIVES = ['Épica', 'Lendária', 'Mágica', 'Incrível', 'Veloz', 'Sábia', 'Caótica', 'Ninja', 'Suprema', 'Genial'];
 const NOUNS = ['Arena', 'Mansão', 'Galáxia', 'Toca', 'Base', 'Fortaleza', 'Cidade', 'Academia', 'Nave', 'Ilha'];
 
@@ -48,13 +46,11 @@ const INITIAL_MOCK_ROOMS: RoomConfig[] = [
 const normalize = (str: string) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase() : "";
 const generateRoomId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
-// COMPONENTE: PLAYER CARD RESPONSIVO
 const PlayerCard: React.FC<{
   player: Player;
   onRemove?: (player: Player) => void;
   onToggleDifficulty?: (id: string) => void;
-  isSidebar?: boolean;
-}> = ({ player, onRemove, onToggleDifficulty, isSidebar }) => {
+}> = ({ player, onRemove, onToggleDifficulty }) => {
   const difficultyLabel = player.difficulty === Difficulty.EASY ? 'Fácil' : player.difficulty === Difficulty.HARD ? 'Gênio' : 'Médio';
   const difficultyColor = player.difficulty === Difficulty.EASY ? 'text-emerald-400 border-emerald-500/30' : 
                          player.difficulty === Difficulty.HARD ? 'text-rose-400 border-rose-500/30' : 
@@ -116,13 +112,52 @@ const App: React.FC = () => {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState<{ room: RoomConfig; input: string } | null>(null);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [totalRounds, setTotalRounds] = useState(5);
   const [currentRound, setCurrentRound] = useState(0);
   const [currentLetter, setCurrentLetter] = useState('');
   const [myAnswers, setMyAnswers] = useState<Record<string, string>>({});
   const [results, setResults] = useState<ValidationResult[]>([]);
   const [timer, setTimer] = useState(60);
+  const [specialGreeting, setSpecialGreeting] = useState<string | null>(null);
+  const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
+
+  const checkSpecialName = (name: string) => {
+    const trimmed = name.trim().toLowerCase();
+    const gislaineGreeting = "Oi Gislaine! Sua presença deixa a arena mais alegre. 😊";
+    const greetings: Record<string, string> = {
+      "junior": "Que bom te ver aqui, Junior! Bora jogar? ❤️",
+      "gislaine": gislaineGreeting,
+      "gi": gislaineGreeting,
+      "miguel": "Miguel na área! Mostra pra esse gênio como se faz. 🚀",
+      "vitoria": "Vitória chegou! Com esse nome, o destino já está traçado. ✨",
+      "vitória": "Vitória chegou! Com esse nome, o destino já está traçado. ✨"
+    };
+
+    if (greetings[trimmed]) {
+      setSpecialGreeting(greetings[trimmed]);
+      setTimeout(() => setSpecialGreeting(null), 8000);
+    }
+  };
+
+  const fetchSuggestions = async () => {
+    setIsFetchingSuggestions(true);
+    const suggestions = await getCategorySuggestions();
+    if (suggestions.length > 0) {
+      setCategories(prev => {
+        const uniqueSuggestions = suggestions
+          .filter(s => !prev.some(p => normalize(p.name) === normalize(s)))
+          .map((s, i) => ({ id: `ai-${i}-${Date.now()}`, name: s, isAiSuggested: true }));
+        return [...prev, ...uniqueSuggestions];
+      });
+    }
+    setIsFetchingSuggestions(false);
+  };
+
+  useEffect(() => {
+    if (gameState === GameState.LOBBY) {
+      fetchSuggestions();
+    }
+  }, [gameState]);
 
   const startRoomConfiguration = () => {
     setNewRoomName(generateRandomRoomName());
@@ -138,6 +173,7 @@ const App: React.FC = () => {
     setRoomConfig(config);
     setPlayers([me]);
     setGameState(GameState.LOBBY);
+    checkSpecialName(playerName);
   };
 
   const joinRoom = (room: RoomConfig) => {
@@ -150,6 +186,7 @@ const App: React.FC = () => {
     setRoomConfig(room);
     setPlayers([me]);
     setGameState(GameState.LOBBY);
+    checkSpecialName(playerName);
   };
 
   const addBot = () => {
@@ -163,6 +200,7 @@ const App: React.FC = () => {
   };
 
   const startRound = () => {
+    if (categories.length < 5) return;
     setCurrentRound(prev => (currentRound >= totalRounds ? 1 : prev + 1));
     const alphabet = 'ABCDEFGHIJKLMNOPRSTUV';
     setCurrentLetter(alphabet[Math.floor(Math.random() * alphabet.length)]);
@@ -200,37 +238,47 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameState, timer]);
 
+  const shouldShowScore = gameState === GameState.PLAYING || gameState === GameState.JUDGING || gameState === GameState.RESULTS;
+
   return (
     <div className="flex-1 flex flex-col w-full max-w-screen-xl mx-auto">
-      {/* NAVBAR RESPONSIVA */}
-      <nav className="glass sticky top-0 z-[110] px-4 py-3 flex justify-between items-center border-b border-white/5 shadow-xl pt-[var(--safe-top)]">
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setGameState(GameState.START)}>
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-sm">S</div>
-          <h1 className="hidden sm:block font-black text-sm uppercase tracking-tighter">Stop <span className="text-indigo-400">Genius AI</span></h1>
+      <nav className="glass sticky top-0 z-[110] px-4 py-4 sm:py-3 flex justify-between items-center border-b border-white/10 shadow-xl" style={{ paddingTop: 'calc(var(--safe-top) + 0.5rem)', paddingBottom: '0.75rem' }}>
+        <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => setGameState(GameState.START)}>
+          <div className="w-10 h-10 sm:w-8 sm:h-8 bg-indigo-600 rounded-xl sm:rounded-lg flex items-center justify-center font-black text-lg sm:text-sm shadow-indigo-500/20 shadow-lg">S</div>
+          <h1 className="font-black text-xs sm:text-sm uppercase tracking-tighter leading-none">
+            Stop <br className="sm:hidden" /> <span className="text-indigo-400">Genius AI</span>
+          </h1>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={() => setShowRulesModal(true)} className="p-2 text-slate-400 hover:text-white transition-colors">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+        
+        <div className="flex items-center gap-2 sm:gap-4">
+          <button onClick={() => setShowRulesModal(true)} className="p-2 sm:p-2 text-slate-300 hover:text-white transition-all bg-white/5 rounded-xl border border-white/10">
+            <svg className="w-6 h-6 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
           </button>
-          <div className="text-right border-l border-white/10 pl-3">
-            <span className="text-[7px] font-black uppercase text-slate-500 block">Pts</span>
-            <span className="text-sm font-black text-indigo-400">{players.find(p => p.id === 'me')?.totalScore || 0}</span>
-          </div>
+          
+          {shouldShowScore && (
+            <div className="flex items-center gap-2 bg-slate-900/50 px-3 py-1.5 rounded-xl border border-white/10 shadow-inner animate-pop">
+              <div className="text-right">
+                <span className="text-[8px] font-black uppercase text-slate-500 block leading-none mb-0.5">PTS</span>
+                <span className="text-lg sm:text-sm font-black text-indigo-400 leading-none">{players.find(p => p.id === 'me')?.totalScore || 0}</span>
+              </div>
+            </div>
+          )}
         </div>
       </nav>
 
       <main className="flex-1 overflow-y-auto px-4 py-4 md:py-8 custom-scrollbar pb-24">
-        {/* START SCREEN */}
         {gameState === GameState.START && (
           <div className="max-w-md mx-auto space-y-8 animate-slide-up">
             {!isConfiguringNewRoom ? (
               <div className="glass-heavy p-6 rounded-3xl border-white/10 space-y-6 shadow-2xl">
                 <div className="flex flex-col items-center gap-6">
-                  <div className="relative group">
+                  <div className="relative">
                     <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl flex items-center justify-center text-5xl shadow-2xl transition-all duration-500 border-2 border-white/10" style={{ backgroundColor: selectedColor }}>{selectedAvatar}</div>
-                    <div className="absolute -bottom-2 -right-2 grid grid-cols-4 gap-1 bg-slate-900 p-1.5 rounded-xl border border-white/10">
+                    <div className="absolute -bottom-1 -left-16 grid grid-cols-4 gap-1.5 bg-slate-900/95 backdrop-blur-md p-2 rounded-2xl border border-white/20 shadow-2xl transition-all hover:scale-105">
                       {AVATAR_COLORS.map(color => (
-                        <button key={color} onClick={() => setSelectedColor(color)} className={`w-3.5 h-3.5 rounded-full ${selectedColor === color ? 'scale-125 ring-1 ring-white/50' : 'opacity-40'}`} style={{ backgroundColor: color }} />
+                        <button key={color} onClick={() => setSelectedColor(color)} className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full transition-all ${selectedColor === color ? 'scale-125 ring-2 ring-white shadow-lg z-10' : 'opacity-40 hover:opacity-80'}`} style={{ backgroundColor: color }} />
                       ))}
                     </div>
                   </div>
@@ -262,28 +310,83 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* LOBBY RESPONSIVO */}
-        {gameState === GameState.LOBBY && (
-          <div className="max-w-4xl mx-auto flex flex-col lg:grid lg:grid-cols-12 gap-6 animate-pop">
-            <div className="lg:col-span-4 space-y-4">
-              <div className="glass p-5 rounded-2xl space-y-4 shadow-lg">
-                <div className="flex justify-between items-start"><div className="min-w-0 flex-1"><h2 className="text-lg font-black text-indigo-400 truncate">{roomConfig?.name}</h2><p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">ID: {roomConfig?.id}</p></div><button onClick={() => setShowInviteModal(true)} className="w-8 h-8 bg-emerald-600/10 text-emerald-400 rounded-lg flex items-center justify-center text-sm">🔗</button></div>
-                <div className="pt-3 border-t border-white/5 flex justify-between items-center text-[10px] font-bold text-slate-500"><span>Vagas</span><span>{players.length}/{roomConfig?.maxPlayers}</span></div>
-              </div>
-              <div className="space-y-1">{players.map(p => <PlayerCard key={p.id} player={p} onRemove={() => setPlayers(prev => prev.filter(x => x.id !== p.id))} onToggleDifficulty={toggleBotDifficulty} />)}{players.length < (roomConfig?.maxPlayers || 10) && <button onClick={addBot} className="w-full border border-dashed border-slate-800 p-4 rounded-xl text-slate-600 font-bold hover:text-indigo-400 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-widest">+ Adicionar Bot</button>}</div>
+        {gameState === GameState.BROWSER && (
+          <div className="max-w-2xl mx-auto space-y-6 animate-pop">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-black uppercase text-indigo-400">Arenas Disponíveis</h2>
+              <button onClick={() => setGameState(GameState.START)} className="text-[10px] font-black uppercase text-slate-500 hover:text-white">Voltar</button>
             </div>
-            <div className="lg:col-span-8 glass-heavy p-6 rounded-3xl space-y-6 flex flex-col shadow-xl">
-              <h3 className="text-sm font-black text-purple-400 uppercase tracking-tight flex items-center gap-2"><span className="w-1 h-5 bg-purple-500 rounded-full"></span> Temas da Partida</h3>
-              <div className="space-y-4 flex-1">
-                <div className="flex gap-2"><input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder="Novo tema..." className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none" /><button onClick={() => { if(newCategoryName.trim()){setCategories([...categories, {id: Date.now().toString(), name: newCategoryName}]); setNewCategoryName('')} }} className="bg-indigo-600 px-5 rounded-xl font-black text-[10px] uppercase">Add</button></div>
-                <div className="flex flex-wrap gap-2">{categories.map(c => <span key={c.id} className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase flex items-center gap-2">{c.name}{roomConfig?.hostId === 'me' && <button onClick={() => setCategories(categories.filter(x => x.id !== c.id))} className="text-red-500 hover:text-red-400">×</button>}</span>)}</div>
-              </div>
-              <button onClick={startRound} className="w-full bg-indigo-600 hover:bg-indigo-500 py-5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all">Lançar Partida</button>
+            <div className="relative">
+              <input type="text" value={roomSearch} onChange={e => setRoomSearch(e.target.value)} placeholder="Pesquisar sala por nome ou ID..." className="w-full bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 text-sm outline-none focus:border-indigo-500/50" />
+            </div>
+            <div className="grid gap-3">
+              {availableRooms.filter(r => r.name.toLowerCase().includes(roomSearch.toLowerCase())).map(room => (
+                <button key={room.id} onClick={() => joinRoom(room)} className="glass p-5 rounded-2xl flex items-center justify-between hover:bg-white/5 transition-all border-white/10 group">
+                  <div className="text-left">
+                    <div className="flex items-center gap-2"><span className="font-black text-sm uppercase">{room.name}</span>{room.isPrivate && <span className="text-xs">🔒</span>}</div>
+                    <span className="text-[10px] font-bold text-slate-600 uppercase">Host: {room.hostId} • ID: {room.id}</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-xs font-black text-indigo-400">{room.currentPlayers}/{room.maxPlayers}</span>
+                    <div className="bg-indigo-600 group-hover:bg-indigo-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-lg">Entrar</div>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         )}
 
-        {/* JOGO EM ANDAMENTO - ERGONOMIA TOTAL */}
+        {gameState === GameState.LOBBY && (
+          <div className="max-w-4xl mx-auto flex flex-col gap-6 animate-pop">
+            {specialGreeting && (
+              <div className="w-full bg-indigo-600/10 border border-indigo-500/30 p-4 rounded-2xl text-center shadow-lg animate-pop relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-500/5 to-transparent animate-shimmer" />
+                <p className="font-bold text-indigo-200 text-sm sm:text-base">{specialGreeting}</p>
+              </div>
+            )}
+            
+            <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6">
+              <div className="lg:col-span-4 space-y-4">
+                <div className="glass p-5 rounded-2xl space-y-4 shadow-lg">
+                  <div className="flex justify-between items-start"><div className="min-w-0 flex-1"><h2 className="text-lg font-black text-indigo-400 truncate">{roomConfig?.name}</h2><p className="text-[8px] font-bold text-slate-500 uppercase mt-0.5">ID: {roomConfig?.id}</p></div><button onClick={() => setShowInviteModal(true)} className="w-8 h-8 bg-emerald-600/10 text-emerald-400 rounded-lg flex items-center justify-center text-sm">🔗</button></div>
+                  <div className="pt-3 border-t border-white/5 flex justify-between items-center text-[10px] font-bold text-slate-500"><span>Vagas</span><span>{players.length}/{roomConfig?.maxPlayers}</span></div>
+                </div>
+                <div className="space-y-1">{players.map(p => <PlayerCard key={p.id} player={p} onRemove={() => setPlayers(prev => prev.filter(x => x.id !== p.id))} onToggleDifficulty={toggleBotDifficulty} />)}{players.length < (roomConfig?.maxPlayers || 10) && <button onClick={addBot} className="w-full border border-dashed border-slate-800 p-4 rounded-xl text-slate-600 font-bold hover:text-indigo-400 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-widest">+ Adicionar Bot</button>}</div>
+              </div>
+              <div className="lg:col-span-8 glass-heavy p-6 rounded-3xl space-y-6 flex flex-col shadow-xl">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-sm font-black text-purple-400 uppercase tracking-tight flex items-center gap-2"><span className="w-1 h-5 bg-purple-500 rounded-full"></span> Temas da Partida</h3>
+                  {isFetchingSuggestions && <span className="text-[10px] font-black text-slate-500 animate-pulse uppercase">Gênio sugerindo temas...</span>}
+                </div>
+                <div className="space-y-4 flex-1">
+                  <div className="flex gap-2"><input type="text" value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)} placeholder="Novo tema..." className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none" /><button onClick={() => { if(newCategoryName.trim()){setCategories([...categories, {id: Date.now().toString(), name: newCategoryName}]); setNewCategoryName('')} }} className="bg-indigo-600 px-5 rounded-xl font-black text-[10px] uppercase">Add</button></div>
+                  <div className="flex flex-wrap gap-2">
+                    {categories.map(c => (
+                      <span key={c.id} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase flex items-center gap-2 border transition-all ${c.isAiSuggested ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-300' : 'bg-white/5 border-white/10'}`}>
+                        {c.name}
+                        {c.isAiSuggested && <span className="bg-indigo-600 text-white text-[7px] px-1 rounded">IA</span>}
+                        {roomConfig?.hostId === 'me' && (
+                          <button onClick={() => setCategories(categories.filter(x => x.id !== c.id))} className="text-red-500 hover:text-red-400 ml-1 text-base leading-none">×</button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  {categories.length < 5 && (
+                    <p className="text-rose-400 text-[10px] font-black uppercase tracking-wider animate-pulse">São necessárias pelo menos 5 categorias para começar.</p>
+                  )}
+                </div>
+                <button 
+                  onClick={startRound} 
+                  disabled={categories.length < 5}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed py-5 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/20 active:scale-95 transition-all"
+                >
+                  Lançar Partida
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {gameState === GameState.PLAYING && (
           <div className="max-w-3xl mx-auto flex flex-col animate-pop">
             <div className="glass p-5 rounded-3xl mb-6 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-2xl border-indigo-500/20">
@@ -299,19 +402,17 @@ const App: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {categories.map((cat, i) => (
                 <div key={cat.id} className="glass-heavy p-5 rounded-3xl space-y-2 border-white/5 focus-within:border-indigo-500/40 transition-all">
-                  <label className="text-[10px] font-black uppercase text-indigo-400 tracking-widest block ml-1">{cat.name}</label>
+                  <label className="text-[10px] font-black uppercase text-indigo-400 tracking-widest block ml-1">{cat.name}{cat.isAiSuggested && " (IA)"}</label>
                   <input type="text" value={myAnswers[cat.id] || ''} onChange={e => setMyAnswers({...myAnswers, [cat.id]: e.target.value})} placeholder="..." autoFocus={i === 0} className="w-full bg-black/40 border border-white/5 rounded-2xl px-5 py-4 text-2xl font-black uppercase outline-none focus:ring-4 ring-indigo-500/5 transition-all text-center placeholder:text-slate-900" />
                 </div>
               ))}
             </div>
-            {/* PROGRESS GAUGE */}
             <div className="fixed bottom-0 left-0 right-0 h-1.5 bg-slate-950/50 z-[150] pb-[var(--safe-bottom)]">
               <div className={`h-full transition-all duration-1000 ease-linear ${timer <= 10 ? 'bg-red-500' : 'bg-indigo-600'}`} style={{ width: `${(timer / 60) * 100}%` }} />
             </div>
           </div>
         )}
 
-        {/* LOADING & RESULTS */}
         {gameState === GameState.JUDGING && (
           <div className="flex flex-col items-center justify-center min-h-[50vh] gap-6 text-center animate-slide-up">
             <div className="relative"><div className="w-20 h-20 border-[6px] border-indigo-500/10 border-t-indigo-500 rounded-2xl animate-spin"></div><div className="absolute inset-0 flex items-center justify-center text-3xl animate-bounce">🧠</div></div>
@@ -338,13 +439,13 @@ const App: React.FC = () => {
                     </div>
                   ))}
                 </div>
-                <button onClick={startRound} className="w-full py-5 rounded-2xl font-black text-sm uppercase bg-indigo-600 hover:bg-indigo-500 transition-all shadow-xl">Continuar →</button>
+                <button onClick={() => setGameState(GameState.LOBBY)} className="w-full py-5 rounded-2xl font-black text-sm uppercase bg-indigo-600 hover:bg-indigo-500 transition-all shadow-xl">Continuar →</button>
               </div>
               <div className="lg:col-span-8 space-y-6">
                 <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">Detalhamento da Letra {currentLetter}</h3>
                 {categories.map(cat => (
                   <div key={cat.id} className="glass-heavy rounded-3xl overflow-hidden shadow-xl">
-                    <div className="bg-indigo-600/10 px-6 py-3 font-black text-xs text-indigo-400 flex justify-between uppercase"><span>{cat.name}</span></div>
+                    <div className="bg-indigo-600/10 px-6 py-3 font-black text-xs text-indigo-400 flex justify-between uppercase"><span>{cat.name}{cat.isAiSuggested && " (IA)"}</span></div>
                     <div className="divide-y divide-white/5">
                       {players.map(p => {
                         const res = results.find(r => normalize(r.playerName).includes(normalize(p.name)) && normalize(r.categoryName) === normalize(cat.name));
@@ -353,7 +454,9 @@ const App: React.FC = () => {
                             <div className="w-10 h-10 rounded-xl flex items-center justify-center text-2xl shrink-0" style={{backgroundColor: p.color}}>{p.avatar}</div>
                             <div className="flex-1 min-w-0">
                               <div className="flex justify-between items-center mb-1"><span className="text-[8px] font-black text-slate-500 uppercase">{p.name}</span><span className={`text-xl font-black ${res?.isValid ? (res.score === 10 ? 'text-emerald-400' : 'text-amber-400') : 'text-slate-800'}`}>{res?.score || 0}</span></div>
-                              <p className={`text-lg font-black uppercase truncate ${res?.isValid ? 'text-white' : 'text-slate-800 line-through'}`}>{p.answers[cat.id] || '---'}</p>
+                              <p className={`text-lg font-black uppercase truncate ${res?.isValid ? 'text-white' : 'text-slate-800 line-through'}`}>
+                                {res?.answer || '---'}
+                              </p>
                               {res?.reason && <p className="text-[10px] text-slate-500 italic mt-1.5 leading-snug">"{res.reason}"</p>}
                             </div>
                           </div>
@@ -368,7 +471,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* MODAL REGRAS RESPONSIVO */}
       {showRulesModal && (
         <div className="fixed inset-0 z-[300] flex items-end sm:items-center justify-center p-4 pt-[var(--safe-top)] pb-[var(--safe-bottom)]">
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => setShowRulesModal(false)}></div>
@@ -378,7 +480,7 @@ const App: React.FC = () => {
             <div className="space-y-4 text-slate-400 text-sm max-h-[40vh] overflow-y-auto pr-4 custom-scrollbar">
               <div className="space-y-1"><h4 className="font-black text-indigo-300 uppercase text-xs">01. Rapidez</h4><p>Responda antes do cronômetro zerar ou alguém apertar STOP.</p></div>
               <div className="space-y-1"><h4 className="font-black text-purple-300 uppercase text-xs">02. Pontuação</h4><p>10 pontos por resposta única. 5 se alguém repetir. 0 se o Gênio invalidar.</p></div>
-              <div className="space-y-1"><h4 className="font-black text-emerald-300 uppercase text-xs">03. O Gênio</h4><p>Nossa IA valida o contexto. Erros bobos de digitação são ignorados, mas o sentido deve estar correto.</p></div>
+              <div className="space-y-1"><h4 className="font-black text-emerald-300 uppercase text-xs">03. O Gênio</h4><p>Nossa IA valida o contexto e sugere temas épicos a cada rodada!</p></div>
             </div>
             <button onClick={() => setShowRulesModal(false)} className="w-full bg-indigo-600 py-4 rounded-2xl font-black uppercase text-xs shadow-lg">Vamos lá!</button>
           </div>

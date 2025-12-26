@@ -2,6 +2,34 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Category, Player, Difficulty } from "../types";
 
+const modelName = "gemini-3-flash-preview";
+
+export async function getCategorySuggestions() {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey || apiKey === "undefined") return [];
+
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = `Sugira 2 categorias (temas) criativas, divertidas e inusitadas para um jogo de STOP (Adedonha). 
+  As categorias devem ser curtas (máximo 3 palavras).
+  Responda APENAS um array JSON com strings. Exemplo: ["Vilões de Cinema", "Itens de Mochila"]`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.8,
+      }
+    });
+    const text = response.text || "[]";
+    return JSON.parse(text) as string[];
+  } catch (error) {
+    console.error("Erro ao sugerir categorias:", error);
+    return [];
+  }
+}
+
 export async function processMultiplayerRound(
   letter: string,
   categories: Category[],
@@ -12,18 +40,16 @@ export async function processMultiplayerRound(
   const apiKey = process.env.API_KEY;
 
   if (!apiKey || apiKey === "undefined") {
-    console.error("ERRO: API_KEY não encontrada. Certifique-se de configurar a variável de ambiente API_KEY na Vercel e realizar um novo deploy.");
+    console.error("ERRO: API_KEY não encontrada.");
     throw new Error("Configuração de API pendente.");
   }
 
-  // Always initialize with the API key from process.env.API_KEY.
   const ai = new GoogleGenAI({ apiKey });
-  const model = "gemini-3-flash-preview";
+  const model = modelName;
   
   const categoryNames = categories.map(c => c.name);
   const targetLetter = letter.toUpperCase();
 
-  // Mapeia a dificuldade para instruções específicas
   const getDifficultyInstruction = (diff?: Difficulty) => {
     switch(diff) {
       case Difficulty.EASY: return "Simples/Iniciante: use palavras óbvias, infantis, ou deixe campos vazios.";

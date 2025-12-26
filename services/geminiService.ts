@@ -9,12 +9,8 @@ export async function processMultiplayerRound(
   humanAnswers: Record<string, string>,
   botPlayers: Player[]
 ) {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API_KEY_MISSING");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  // Always initialize with the API key from process.env.API_KEY.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = "gemini-3-flash-preview";
   
   const categoryNames = categories.map(c => c.name);
@@ -83,6 +79,7 @@ export async function processMultiplayerRound(
   `;
 
   try {
+    // Calling generateContent with the model and prompt directly.
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -92,7 +89,9 @@ export async function processMultiplayerRound(
       }
     });
 
-    const parsed = JSON.parse(response.text);
+    // Directly access text property for parsing.
+    const responseText = response.text || "{}";
+    const parsed = JSON.parse(responseText);
     console.debug("Gênio Judgment:", parsed);
     return parsed;
   } catch (error: any) {

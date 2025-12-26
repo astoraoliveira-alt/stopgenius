@@ -1,6 +1,7 @@
 
 export enum GameState {
   START = 'START',
+  BROWSER = 'BROWSER',
   LOBBY = 'LOBBY',
   PLAYING = 'PLAYING',
   JUDGING = 'JUDGING',
@@ -20,6 +21,7 @@ export interface RoomConfig {
   maxPlayers: number;
   isPrivate: boolean;
   hostId: string;
+  currentPlayers: number;
 }
 
 export interface Category {
@@ -39,7 +41,7 @@ export interface Player {
   roundScore: number;
   totalScore: number;
   status: 'waiting' | 'typing' | 'done';
-  difficulty?: Difficulty; // Dificuldade individual para bots
+  difficulty?: Difficulty;
 }
 
 export interface ValidationResult {

@@ -1,0 +1,5 @@
+{
+  "name": "Stop Genius AI",
+  "description": "A high-fidelity, AI-powered evolution of the classic 'Stop' (Adedonha) game. Features intelligent answer validation using Gemini, dynamic categories, and a sleek, modern UI.",
+  "requestFramePermissions": []
+}

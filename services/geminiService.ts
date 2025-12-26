@@ -9,8 +9,15 @@ export async function processMultiplayerRound(
   humanAnswers: Record<string, string>,
   botPlayers: Player[]
 ) {
+  const apiKey = process.env.API_KEY;
+
+  if (!apiKey || apiKey === "undefined") {
+    console.error("ERRO: API_KEY não encontrada. Certifique-se de configurar a variável de ambiente API_KEY na Vercel e realizar um novo deploy.");
+    throw new Error("Configuração de API pendente.");
+  }
+
   // Always initialize with the API key from process.env.API_KEY.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
   const model = "gemini-3-flash-preview";
   
   const categoryNames = categories.map(c => c.name);
@@ -79,7 +86,6 @@ export async function processMultiplayerRound(
   `;
 
   try {
-    // Calling generateContent with the model and prompt directly.
     const response = await ai.models.generateContent({
       model,
       contents: prompt,
@@ -89,7 +95,6 @@ export async function processMultiplayerRound(
       }
     });
 
-    // Directly access text property for parsing.
     const responseText = response.text || "{}";
     const parsed = JSON.parse(responseText);
     console.debug("Gênio Judgment:", parsed);

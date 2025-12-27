@@ -19,9 +19,12 @@ export interface RoomConfig {
   name: string;
   password?: string;
   maxPlayers: number;
+  maxRounds: number;
+  currentRound: number;
   isPrivate: boolean;
   hostId: string;
   currentPlayers: number;
+  isDailyChallenge?: boolean;
 }
 
 export interface Category {
@@ -43,6 +46,7 @@ export interface Player {
   totalScore: number;
   status: 'waiting' | 'typing' | 'done';
   difficulty?: Difficulty;
+  progress?: number; // 0 to categories.length
 }
 
 export interface ValidationResult {
@@ -53,4 +57,5 @@ export interface ValidationResult {
   score: number;
   reason: string;
   isGeniusChoice?: boolean;
+  emoji?: string;
 }
